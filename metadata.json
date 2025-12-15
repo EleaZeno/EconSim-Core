@@ -1,0 +1,5 @@
+{
+  "name": "EconSim Core",
+  "description": "基于离散时间的经济模拟引擎，专为测试制度规则和代理人行为而设计，具有严格的会计边界。",
+  "requestFramePermissions": []
+}
