@@ -21,7 +21,8 @@ const translateReason = (reason: string) => {
     'WAGE_PAYMENT': '支付工资',
     'PURCHASE_GOODS': '购买商品',
     'INCOME_TAX': '个人所得税',
-    'SUBSIDY': '补贴'
+    'SUBSIDY': '补贴',
+    'BANKRUPTCY_LIQUIDATION': '破产清算'
   };
   return map[reason] || reason;
 };
@@ -82,7 +83,7 @@ const App: React.FC = () => {
             E
           </div>
           <div>
-            <h1 className="text-lg font-bold text-white">EconSim 模拟核心 <span className="text-xs font-normal text-slate-400">v0.1.0 MVP</span></h1>
+            <h1 className="text-lg font-bold text-white">EconSim 模拟核心 <span className="text-xs font-normal text-slate-400">v0.1.1 Beta</span></h1>
             <div className="text-xs text-slate-400 font-mono">当前周期 (Tick): {worldState.tick.toString().padStart(6, '0')}</div>
           </div>
         </div>
@@ -157,20 +158,27 @@ const App: React.FC = () => {
                  <div className="col-span-3 text-right">市场信号</div>
               </div>
               {Array.from(worldState.agents.values()).slice(0, 8).map(agent => (
-                <div key={agent.id} className="grid grid-cols-12 gap-2 p-2 bg-slate-950/50 rounded border border-slate-800/50 hover:border-slate-700 items-center">
-                  <div className="col-span-2 text-emerald-400 font-bold truncate" title={agent.id}>{agent.id}</div>
-                  <div className="col-span-2 text-slate-500">{translateType(agent.type)}</div>
+                <div key={agent.id} className={`grid grid-cols-12 gap-2 p-2 rounded border items-center ${
+                    !agent.active ? 'bg-red-950/30 border-red-900/50 text-slate-500' : 'bg-slate-950/50 border-slate-800/50 hover:border-slate-700'
+                  }`}>
+                  <div className={`col-span-2 font-bold truncate ${!agent.active ? 'text-red-500' : 'text-emerald-400'}`} title={agent.id}>
+                    {agent.id}
+                  </div>
+                  <div className="col-span-2 text-slate-500">
+                    {translateType(agent.type)} 
+                    {!agent.active && <span className="text-[10px] ml-1 bg-red-900 text-red-200 px-1 rounded">破产</span>}
+                  </div>
                   <div className="col-span-2 text-right text-white">${agent.cash.toFixed(1)}</div>
                   <div className="col-span-3 text-right text-amber-400">
                     {agent.type === 'FIRM' 
-                      ? `存货: ${agent.inventory.CONSUMER_GOODS} | 目标: ${agent.productionTarget}` 
+                      ? (agent.active ? `存货: ${agent.inventory.CONSUMER_GOODS} | 目标: ${agent.productionTarget}` : '已清算')
                       : `存货: ${agent.inventory.CONSUMER_GOODS} | 满足度: ${(agent.needsSatisfaction! * 100).toFixed(0)}%`}
                   </div>
                   <div className="col-span-3 text-right text-blue-400">
                     {agent.employedAt 
                       ? '已就业' 
                       : (agent.type === 'FIRM' 
-                          ? `售价: $${agent.salesPrice?.toFixed(1)}` 
+                          ? (agent.active ? `售价: $${agent.salesPrice?.toFixed(1)}` : '-')
                           : `期望工资: $${agent.wageExpectation.toFixed(1)}`)}
                   </div>
                 </div>
