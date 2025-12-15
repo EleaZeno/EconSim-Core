@@ -14,7 +14,8 @@ import {
   SURVIVAL_CONSTRAINTS 
 } from '../constants';
 import { transferMoney, transferResource, validateSystemInvariants } from './accountingService';
-import { householdDecision, firmDecision } from './agentLogic';
+import { householdDecision, firmDecision, bankDecision } from './agentLogic';
+import { applyFiscalPolicy } from './institutions';
 import { DeterministicRNG } from './randomService';
 
 /**
@@ -56,6 +57,7 @@ export const initializeSimulation = (): WorldState => {
     id: govtId,
     type: AgentType.GOVERNMENT,
     cash: 1000,
+    debt: 0,
     inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 0, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
     priceBeliefs: { ...emptyPriceBeliefs },
     wageExpectation: 0,
@@ -68,6 +70,7 @@ export const initializeSimulation = (): WorldState => {
     id: cbId,
     type: AgentType.CENTRAL_BANK,
     cash: 1000000,
+    debt: 0,
     inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 0, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
     priceBeliefs: { ...emptyPriceBeliefs },
     wageExpectation: 0,
@@ -82,6 +85,7 @@ export const initializeSimulation = (): WorldState => {
       id,
       type: AgentType.FIRM,
       cash: 500,
+      debt: 0,
       inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 10, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
       priceBeliefs: { ...defaultPriceBeliefs },
       salesPrice: INITIAL_PRICES[ResourceType.CONSUMER_GOODS],
@@ -101,12 +105,29 @@ export const initializeSimulation = (): WorldState => {
       id,
       type: AgentType.HOUSEHOLD,
       cash: 100,
+      debt: 0,
       inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 2, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
       priceBeliefs: { ...defaultPriceBeliefs },
       wageExpectation: INITIAL_PRICES[ResourceType.LABOR],
       needsSatisfaction: 1,
       currentUtility: 10,
       starvationStreak: 0,
+      active: true
+    });
+  }
+
+  // 4. Create Commercial Banks
+  for (let i = 0; i < INITIAL_POPULATION_COUNTS[AgentType.BANK]; i++) {
+    const id = `BANK_${i}`;
+    agents.set(id, {
+      id,
+      type: AgentType.BANK,
+      cash: 10000, // Capital
+      debt: 0,
+      inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 0, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
+      priceBeliefs: { ...emptyPriceBeliefs },
+      wageExpectation: 0,
+      currentUtility: 0,
       active: true
     });
   }
@@ -142,8 +163,6 @@ export const runTick = (currentState: WorldState): WorldState => {
     // rngState will be updated at the very end
   };
   
-  // Helper to get mutable agent reference for this tick
-  const getAgent = (id: string) => nextState.agents.get(id)!;
   const govtId = 'GOVT_01';
 
   // --- v0.1.1: Bankruptcy & Market Exit Phase ---
@@ -168,8 +187,6 @@ export const runTick = (currentState: WorldState): WorldState => {
          if (agent.cash > 0) {
            transferMoney(nextState, agent.id, govtId, agent.cash, 'BANKRUPTCY_LIQUIDATION');
          }
-         
-         // In a real DB we might delete the record, but here we keep it inactive for logs
        }
     }
   });
@@ -185,6 +202,7 @@ export const runTick = (currentState: WorldState): WorldState => {
 
     if (agent.type === AgentType.HOUSEHOLD) householdDecision(mutableAgent, nextState, rng);
     if (agent.type === AgentType.FIRM) firmDecision(mutableAgent, nextState, rng);
+    if (agent.type === AgentType.BANK) bankDecision(mutableAgent, nextState, rng);
   });
 
   // --- 2. Labor Market Clearing (Serial / Matching) ---
@@ -194,7 +212,7 @@ export const runTick = (currentState: WorldState): WorldState => {
   // Deterministic Shuffle using RNG (NOT Math.random)
   const shuffledHouseholds = rng.shuffle([...households]);
 
-  // Cleanup: Ensure no one works for a dead firm (redundant check but safe)
+  // Cleanup: Ensure no one works for a dead firm
   shuffledHouseholds.forEach(hh => { 
     if (hh.employedAt && nextState.agents.get(hh.employedAt)?.active === false) {
       hh.employedAt = null; 
@@ -267,27 +285,14 @@ export const runTick = (currentState: WorldState): WorldState => {
     }
   });
 
-  // --- 5. Fiscal Phase ---
-  const taxRate = nextState.settings.taxRate;
-  
-  // Identify transactions belonging to THIS tick
-  const currentTickTransactions = nextState.ledger.filter(l => l.tick === nextState.tick);
-
-  households.forEach(hh => {
-    if (hh.employedAt) {
-      const income = currentTickTransactions
-        .filter(l => l.toId === hh.id && l.reason === 'WAGE_PAYMENT')
-        .reduce((sum, l) => sum + l.amount, 0);
-
-      if (income > 0) {
-        const tax = income * taxRate;
-        transferMoney(nextState, hh.id, govtId, tax, 'INCOME_TAX');
-      }
-    }
-  });
+  // --- 5. Institutional/Fiscal Phase (Pluggable) ---
+  // Replaced hardcoded logic with modular call
+  applyFiscalPolicy(nextState);
 
   // --- 6. Consumption / Metrics Phase ---
   // v0.1.1: Calculate metrics using current tick data BEFORE pruning ledger
+  
+  const currentTickTransactions = nextState.ledger.filter(l => l.tick === nextState.tick);
   
   const gdp = totalTransactionValue; 
   const avgPrice = totalTransactionVolume > 0 ? totalTransactionValue / totalTransactionVolume : 0;

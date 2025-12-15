@@ -1,6 +1,7 @@
 import { Agent, AgentType, ResourceType, WorldState } from '../types';
 import { BASE_NEEDS, SURVIVAL_CONSTRAINTS } from '../constants';
 import { DeterministicRNG } from './randomService';
+import { transferMoney as execTransfer } from './accountingService';
 
 /**
  * ARCHITECTURE NOTE: AGENT RATIONALITY
@@ -128,4 +129,23 @@ export const firmDecision = (agent: Agent, state: WorldState, rng: Deterministic
     // Cost cutting
     agent.productionTarget = Math.max(1, (agent.productionTarget || 1) - 1);
   }
+};
+
+// --- Bank Logic (v0.1.2) ---
+
+export const bankDecision = (agent: Agent, state: WorldState, rng: DeterministicRNG) => {
+    if (!agent.active) return;
+
+    // MVP Bank Logic: Liquidity Balancer
+    // If Bank has excess cash (from future interest payments), it distributes dividends to Government
+    // to put money back into circulation (Simulating generic "profit" distribution).
+    
+    const SAFE_CAPITAL_BUFFER = 5000;
+    
+    if (agent.cash > SAFE_CAPITAL_BUFFER) {
+        const dividend = agent.cash - SAFE_CAPITAL_BUFFER;
+        execTransfer(state, agent.id, 'GOVT_01', dividend, 'SUBSIDY'); // Using Subsidy as proxy for Dividend for now
+    }
+    
+    // Future v0.2: Scan for Firms with high profit but low cash and offer LOANS.
 };

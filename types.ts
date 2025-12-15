@@ -27,6 +27,7 @@ export interface Agent {
   id: string;
   type: AgentType;
   cash: number;
+  debt: number; // v0.1.2: Credit system foundation
   inventory: Record<ResourceType, number>;
   active: boolean; // v0.1.1: Lifecycle flag
   
