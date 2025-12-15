@@ -24,8 +24,11 @@ export const transferMoney = (
   }
 
   // HARD CONSTRAINT: No overdrafts without explicit credit logic
-  // For MVP, Central Bank can go negative (print money), others cannot.
-  if (sender.type !== 'CENTRAL_BANK' && sender.cash < amount) {
+  // STABILIZER 1: Government (and Central Bank) has infinite liquidity (Sovereign Debt)
+  // This allows the Welfare/Stabilizer loop to function even if tax revenue lags.
+  const hasInfiniteLiquidity = sender.type === AgentType.CENTRAL_BANK || sender.type === AgentType.GOVERNMENT;
+
+  if (!hasInfiniteLiquidity && sender.cash < amount) {
     // Transaction rejected due to insolvency
     return null;
   }
@@ -33,6 +36,11 @@ export const transferMoney = (
   // Execute Transfer
   sender.cash -= amount;
   receiver.cash += amount;
+  
+  // Track Sovereign Debt if Govt goes negative
+  if (sender.type === AgentType.GOVERNMENT && sender.cash < 0) {
+      sender.debt = Math.abs(sender.cash);
+  }
 
   // Log to Ledger
   const entry: LedgerEntry = {
@@ -93,8 +101,9 @@ export const validateSystemInvariants = (state: WorldState, previousMoneySupply?
       calculatedMoneySupply += agent.cash;
     }
     
-    // Invariant 1: Non-CB agents cannot have negative cash
-    if (agent.type !== AgentType.CENTRAL_BANK && agent.cash < -0.0001) {
+    // Invariant 1: Non-Sovereign agents cannot have negative cash
+    const isSovereign = agent.type === AgentType.CENTRAL_BANK || agent.type === AgentType.GOVERNMENT;
+    if (!isSovereign && agent.cash < -0.0001) {
       console.error(`INVARIANT VIOLATION: Agent ${agent.id} has negative cash: ${agent.cash}`);
     }
   });

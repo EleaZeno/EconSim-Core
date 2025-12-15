@@ -1,3 +1,4 @@
+
 export enum AgentType {
   HOUSEHOLD = 'HOUSEHOLD',
   FIRM = 'FIRM',
@@ -13,7 +14,6 @@ export enum ResourceType {
   CAPITAL_EQUIPMENT = 'CAPITAL_EQUIPMENT'
 }
 
-// Double-Entry Accounting Record
 export interface LedgerEntry {
   tick: number;
   fromId: string;
@@ -22,74 +22,114 @@ export interface LedgerEntry {
   reason: string;
 }
 
-// Base structure for any economic actor
+export interface AgentMemory {
+  avgRevenue: number;     
+  avgProfit: number;      
+  avgInventory: number;   
+  avgExpenses: number;    
+}
+
 export interface Agent {
   id: string;
   type: AgentType;
   cash: number;
-  debt: number; // v0.1.2: Credit system foundation
+  debt: number; 
+  bonds: number; 
   inventory: Record<ResourceType, number>;
-  active: boolean; // v0.1.1: Lifecycle flag
+  active: boolean; 
   
-  // Beliefs & Strategy (Internal State)
-  priceBeliefs: Record<ResourceType, number>; // What they think fair price is
+  priceBeliefs: Record<ResourceType, number>; 
   wageExpectation: number;
   
-  // For Firms
+  memory: AgentMemory;
+
+  // Firm specific
   lastProfit?: number;
+  lastRevenue?: number; 
   productionTarget?: number;
   salesPrice?: number;
-  insolvencyStreak?: number; // v0.1.1: Count ticks of distress
+  insolvencyStreak?: number; 
   
-  // For Households
-  // Rationality Contract: Explicit Utility Tracking
+  // Household specific
   currentUtility: number; 
   needsSatisfaction?: number;
   employedAt?: string | null;
-  starvationStreak?: number; // v0.1.1: Count ticks of 0 consumption
-}
-
-export interface MarketOffer {
-  sellerId: string;
-  resource: ResourceType;
-  amount: number;
-  pricePerUnit: number;
+  starvationStreak?: number;
+  skillLevel?: number; 
 }
 
 export interface EconomicMetrics {
   tick: number;
-  gdp: number; // Aggregate production value
-  cpi: number; // Consumer Price Index
+  gdp: number; 
+  cpi: number; 
   unemploymentRate: number;
   moneySupply: number;
   transactionCount: number;
   avgWage: number;
-  activeFirms: number; // v0.1.1
+  activeFirms: number; 
 }
 
-// v0.1.1: Optimization for non-ledger based calculations
-export interface GlobalAggregates {
-  totalWageVolumeLastTick: number;
-  totalSalesVolumeLastTick: number;
+// --- LAYER 2: MARKET MECHANISMS ---
+// A market mechanism defines how buyers and sellers match and transact
+export interface MarketMechanism {
+  id: string; // e.g., "standard_goods_market"
+  name: string;
+  // Execute the market clearing logic
+  resolve: (state: WorldState, rng: any) => void;
+}
+
+// --- LAYER 3: AGENT BEHAVIORS ---
+// A behavior policy defines how an agent perceives state and forms intent
+export interface AgentBehavior {
+  id: string; // e.g., "rational_firm"
+  name: string;
+  type: AgentType;
+  decide: (agent: Agent, state: WorldState, rng: any) => void;
+}
+
+// --- LAYER 4: INSTITUTIONS ---
+// An institution defines system-wide rules (taxes, bankruptcy, welfare)
+export interface Institution {
+  id: string; // e.g., "progressive_tax"
+  name: string;
+  apply: (state: WorldState) => void;
+}
+
+// --- LAYER 5: EXPERIMENT CONFIGURATION ---
+// The DNA of a simulation run
+export interface ExperimentConfig {
+  id: string;
+  name: string;
+  description: string;
+  initialSeed: number;
+  
+  // Registry Keys for mechanisms to load
+  activeMarkets: string[];      // Order matters! e.g., ['labor_market', 'goods_market']
+  activeInstitutions: string[]; // e.g., ['bankruptcy_law', 'income_tax']
+  
+  // Agent Logic Mapping
+  agentBehaviors: {
+    [key in AgentType]?: string; // e.g., FIRM: 'heuristic_firm'
+  };
+
+  // Hyperparameters
+  params: {
+    taxRate: number;
+    salesTax: number;
+    subsidyRate: number;
+    moneyPrintingEnabled: boolean;
+    [key: string]: any; // Allow custom params for specific mechanisms
+  };
 }
 
 export interface WorldState {
   tick: number;
   agents: Map<string, Agent>;
-  ledger: LedgerEntry[]; // History of money flow (Pruned in v0.1.1)
+  ledger: LedgerEntry[]; 
   metricsHistory: EconomicMetrics[];
-  settings: SimulationSettings;
-  aggregates: GlobalAggregates; // v0.1.1: Caching layer
-  // DETERMINISM CONTRACT:
-  // The state of the PRNG must be serialized here.
-  // Replaying a tick with the same RNG state must yield bit-level identical results.
+  
+  // Embedded Config for Reproducibility
+  config: ExperimentConfig;
+  
   rngState: number; 
-}
-
-export interface SimulationSettings {
-  initialSeed: number; // The master seed
-  taxRate: number;
-  salesTax: number;
-  subsidyRate: number;
-  moneyPrintingEnabled: boolean;
 }
