@@ -28,6 +28,7 @@ export interface Agent {
   type: AgentType;
   cash: number;
   inventory: Record<ResourceType, number>;
+  active: boolean; // v0.1.1: Lifecycle flag
   
   // Beliefs & Strategy (Internal State)
   priceBeliefs: Record<ResourceType, number>; // What they think fair price is
@@ -37,12 +38,14 @@ export interface Agent {
   lastProfit?: number;
   productionTarget?: number;
   salesPrice?: number;
+  insolvencyStreak?: number; // v0.1.1: Count ticks of distress
   
   // For Households
   // Rationality Contract: Explicit Utility Tracking
   currentUtility: number; 
   needsSatisfaction?: number;
   employedAt?: string | null;
+  starvationStreak?: number; // v0.1.1: Count ticks of 0 consumption
 }
 
 export interface MarketOffer {
@@ -60,14 +63,22 @@ export interface EconomicMetrics {
   moneySupply: number;
   transactionCount: number;
   avgWage: number;
+  activeFirms: number; // v0.1.1
+}
+
+// v0.1.1: Optimization for non-ledger based calculations
+export interface GlobalAggregates {
+  totalWageVolumeLastTick: number;
+  totalSalesVolumeLastTick: number;
 }
 
 export interface WorldState {
   tick: number;
   agents: Map<string, Agent>;
-  ledger: LedgerEntry[]; // History of money flow
+  ledger: LedgerEntry[]; // History of money flow (Pruned in v0.1.1)
   metricsHistory: EconomicMetrics[];
   settings: SimulationSettings;
+  aggregates: GlobalAggregates; // v0.1.1: Caching layer
   // DETERMINISM CONTRACT:
   // The state of the PRNG must be serialized here.
   // Replaying a tick with the same RNG state must yield bit-level identical results.

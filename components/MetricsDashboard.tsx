@@ -8,12 +8,12 @@ interface MetricsDashboardProps {
 
 export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ state }) => {
   const data = state.metricsHistory.slice(-50); // Show last 50 ticks
-  const latest = data[data.length - 1] || { gdp: 0, cpi: 0, unemploymentRate: 0, moneySupply: 0 };
+  const latest = data[data.length - 1] || { gdp: 0, cpi: 0, unemploymentRate: 0, moneySupply: 0, activeFirms: 0 };
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 w-full p-4">
       {/* KPI Cards */}
-      <div className="col-span-1 md:col-span-2 grid grid-cols-4 gap-4 mb-4">
+      <div className="col-span-1 md:col-span-2 grid grid-cols-5 gap-4 mb-4">
         <div className="bg-slate-800 p-4 rounded-lg shadow border border-slate-700">
           <h3 className="text-slate-400 text-sm font-semibold">GDP (名义)</h3>
           <p className="text-2xl font-bold text-emerald-400">${latest.gdp.toFixed(0)}</p>
@@ -29,6 +29,10 @@ export const MetricsDashboard: React.FC<MetricsDashboardProps> = ({ state }) => 
         <div className="bg-slate-800 p-4 rounded-lg shadow border border-slate-700">
           <h3 className="text-slate-400 text-sm font-semibold">货币供应量 (M1)</h3>
           <p className="text-2xl font-bold text-amber-400">${latest.moneySupply.toFixed(0)}</p>
+        </div>
+        <div className="bg-slate-800 p-4 rounded-lg shadow border border-slate-700">
+          <h3 className="text-slate-400 text-sm font-semibold">存活企业</h3>
+          <p className="text-2xl font-bold text-purple-400">{latest.activeFirms}</p>
         </div>
       </div>
 

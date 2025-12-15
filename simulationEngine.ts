@@ -6,8 +6,14 @@ import {
   SimulationSettings, 
   EconomicMetrics 
 } from '../types';
-import { INITIAL_POPULATION_COUNTS, INITIAL_PRICES, INITIAL_SETTINGS } from '../constants';
-import { transferMoney, transferResource } from './accountingService';
+import { 
+  INITIAL_POPULATION_COUNTS, 
+  INITIAL_PRICES, 
+  INITIAL_SETTINGS, 
+  MAX_LEDGER_ITEMS, 
+  SURVIVAL_CONSTRAINTS 
+} from '../constants';
+import { transferMoney, transferResource, validateSystemInvariants } from './accountingService';
 import { householdDecision, firmDecision } from './agentLogic';
 import { DeterministicRNG } from './randomService';
 
@@ -53,7 +59,8 @@ export const initializeSimulation = (): WorldState => {
     inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 0, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
     priceBeliefs: { ...emptyPriceBeliefs },
     wageExpectation: 0,
-    currentUtility: 0
+    currentUtility: 0,
+    active: true
   });
 
   const cbId = 'CB_01';
@@ -64,7 +71,8 @@ export const initializeSimulation = (): WorldState => {
     inventory: { [ResourceType.LABOR]: 0, [ResourceType.RAW_MATERIALS]: 0, [ResourceType.CONSUMER_GOODS]: 0, [ResourceType.CAPITAL_EQUIPMENT]: 0 },
     priceBeliefs: { ...emptyPriceBeliefs },
     wageExpectation: 0,
-    currentUtility: 0
+    currentUtility: 0,
+    active: true
   });
 
   // 2. Create Firms
@@ -80,7 +88,9 @@ export const initializeSimulation = (): WorldState => {
       wageExpectation: INITIAL_PRICES[ResourceType.LABOR],
       productionTarget: 2,
       lastProfit: 0,
-      currentUtility: 0
+      currentUtility: 0,
+      insolvencyStreak: 0,
+      active: true
     });
   }
 
@@ -95,7 +105,9 @@ export const initializeSimulation = (): WorldState => {
       priceBeliefs: { ...defaultPriceBeliefs },
       wageExpectation: INITIAL_PRICES[ResourceType.LABOR],
       needsSatisfaction: 1,
-      currentUtility: 10
+      currentUtility: 10,
+      starvationStreak: 0,
+      active: true
     });
   }
 
@@ -105,7 +117,11 @@ export const initializeSimulation = (): WorldState => {
     ledger: [],
     metricsHistory: [],
     settings: { ...INITIAL_SETTINGS },
-    rngState: seed // Initial Seed
+    rngState: seed, // Initial Seed
+    aggregates: {
+      totalSalesVolumeLastTick: 0,
+      totalWageVolumeLastTick: 0
+    }
   };
 };
 
@@ -128,12 +144,42 @@ export const runTick = (currentState: WorldState): WorldState => {
   
   // Helper to get mutable agent reference for this tick
   const getAgent = (id: string) => nextState.agents.get(id)!;
+  const govtId = 'GOVT_01';
+
+  // --- v0.1.1: Bankruptcy & Market Exit Phase ---
+  // We process this BEFORE decisions, so dead firms don't hire.
+  
+  nextState.agents.forEach(agent => {
+    if (agent.type === AgentType.FIRM && agent.active) {
+       // Check for insolvency
+       if ((agent.insolvencyStreak || 0) >= SURVIVAL_CONSTRAINTS.INSOLVENCY_THRESHOLD) {
+         // BANKRUPTCY EVENT
+         agent.active = false;
+         
+         // 1. Fire all employees
+         nextState.agents.forEach(other => {
+           if (other.employedAt === agent.id) {
+             other.employedAt = null;
+             // other.wageExpectation *= 0.8; // Shock
+           }
+         });
+
+         // 2. Liquidate remaining cash to Govt (Conservation of Money)
+         if (agent.cash > 0) {
+           transferMoney(nextState, agent.id, govtId, agent.cash, 'BANKRUPTCY_LIQUIDATION');
+         }
+         
+         // In a real DB we might delete the record, but here we keep it inactive for logs
+       }
+    }
+  });
 
   // --- 1. Agent Decision Phase (Parallelizable Candidate) ---
   // Note: agents act based on 'nextState' which currently looks like 'currentState' 
   // until we start applying transactions.
-  // In a parallel implementation, we would pass a ReadOnly snapshot.
   nextState.agents.forEach(agent => {
+    if (!agent.active) return;
+
     const mutableAgent = { ...agent, inventory: { ...agent.inventory }, priceBeliefs: { ...agent.priceBeliefs } };
     nextState.agents.set(agent.id, mutableAgent);
 
@@ -142,20 +188,34 @@ export const runTick = (currentState: WorldState): WorldState => {
   });
 
   // --- 2. Labor Market Clearing (Serial / Matching) ---
-  const firms = Array.from(nextState.agents.values()).filter(a => a.type === AgentType.FIRM);
-  const households = Array.from(nextState.agents.values()).filter(a => a.type === AgentType.HOUSEHOLD);
+  const firms = Array.from(nextState.agents.values()).filter(a => a.type === AgentType.FIRM && a.active);
+  const households = Array.from(nextState.agents.values()).filter(a => a.type === AgentType.HOUSEHOLD && a.active);
   
   // Deterministic Shuffle using RNG (NOT Math.random)
   const shuffledHouseholds = rng.shuffle([...households]);
 
-  // Reset employment
-  shuffledHouseholds.forEach(hh => { hh.employedAt = null; });
+  // Cleanup: Ensure no one works for a dead firm (redundant check but safe)
+  shuffledHouseholds.forEach(hh => { 
+    if (hh.employedAt && nextState.agents.get(hh.employedAt)?.active === false) {
+      hh.employedAt = null; 
+    }
+  });
 
   firms.forEach(firm => {
     const laborNeeded = firm.productionTarget || 0;
-    let laborHired = 0;
+    // Count currently employed (who are still active)
+    let laborHired = shuffledHouseholds.filter(h => h.employedAt === firm.id).length;
     const wageOffer = firm.wageExpectation;
 
+    // Firing logic if target reduced
+    if (laborHired > laborNeeded) {
+        const workers = shuffledHouseholds.filter(h => h.employedAt === firm.id);
+        const toFire = workers.slice(0, laborHired - laborNeeded);
+        toFire.forEach(w => w.employedAt = null);
+        laborHired = laborNeeded;
+    }
+
+    // Hiring logic
     for (const hh of shuffledHouseholds) {
       if (laborHired >= laborNeeded) break;
       if (hh.employedAt) continue;
@@ -209,12 +269,14 @@ export const runTick = (currentState: WorldState): WorldState => {
 
   // --- 5. Fiscal Phase ---
   const taxRate = nextState.settings.taxRate;
-  const govtId = 'GOVT_01';
   
+  // Identify transactions belonging to THIS tick
+  const currentTickTransactions = nextState.ledger.filter(l => l.tick === nextState.tick);
+
   households.forEach(hh => {
     if (hh.employedAt) {
-      const income = nextState.ledger
-        .filter(l => l.toId === hh.id && l.tick === nextState.tick && l.reason === 'WAGE_PAYMENT')
+      const income = currentTickTransactions
+        .filter(l => l.toId === hh.id && l.reason === 'WAGE_PAYMENT')
         .reduce((sum, l) => sum + l.amount, 0);
 
       if (income > 0) {
@@ -225,15 +287,14 @@ export const runTick = (currentState: WorldState): WorldState => {
   });
 
   // --- 6. Consumption / Metrics Phase ---
-  // GDP
+  // v0.1.1: Calculate metrics using current tick data BEFORE pruning ledger
+  
   const gdp = totalTransactionValue; 
   const avgPrice = totalTransactionVolume > 0 ? totalTransactionValue / totalTransactionVolume : 0;
   const unemployedCount = households.filter(h => !h.employedAt).length;
   const unemploymentRate = households.length > 0 ? unemployedCount / households.length : 0;
   
-  const moneySupply = Array.from(nextState.agents.values())
-    .filter(a => a.type !== AgentType.CENTRAL_BANK) 
-    .reduce((sum, a) => sum + a.cash, 0);
+  const moneySupply = validateSystemInvariants(nextState);
 
   const metric: EconomicMetrics = {
     tick: nextState.tick,
@@ -241,11 +302,24 @@ export const runTick = (currentState: WorldState): WorldState => {
     cpi: avgPrice,
     unemploymentRate,
     moneySupply,
-    transactionCount: nextState.ledger.filter(l => l.tick === nextState.tick).length,
-    avgWage: 0 
+    transactionCount: currentTickTransactions.length,
+    avgWage: 0, // Placeholder
+    activeFirms: firms.length // v0.1.1 metric
   };
 
   nextState.metricsHistory.push(metric);
+
+  // v0.1.1: Aggregates Caching
+  nextState.aggregates = {
+      totalSalesVolumeLastTick: totalTransactionValue,
+      totalWageVolumeLastTick: 0 // TODO: Sum from ledger
+  };
+
+  // v0.1.1: MEMORY SAFETY - Ledger Pruning
+  if (nextState.ledger.length > MAX_LEDGER_ITEMS) {
+      // Keep only the most recent items
+      nextState.ledger = nextState.ledger.slice(-MAX_LEDGER_ITEMS);
+  }
 
   // FINAL STEP: Persist RNG state for next tick
   nextState.rngState = rng.getState();

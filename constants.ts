@@ -25,4 +25,13 @@ export const INITIAL_PRICES = {
   [ResourceType.LABOR]: 20, // Wage
 };
 
-export const MAX_HISTORY_LENGTH = 100; // Keep last 100 ticks in memory for UI
+// --- v0.1.1 Constraints ---
+
+export const MAX_HISTORY_LENGTH = 100; // Keep last 100 ticks of metrics for UI
+export const MAX_LEDGER_ITEMS = 1000;  // Hardcap ledger size to prevent memory leaks
+
+export const SURVIVAL_CONSTRAINTS = {
+  STARVATION_THRESHOLD: 3, // Ticks without food before panic sets in
+  INSOLVENCY_THRESHOLD: 5, // Ticks with negative profit/low cash before bankruptcy
+  FIRM_MIN_CASH: 50,       // Minimum cash buffer for a firm to feel safe
+};

@@ -1,5 +1,5 @@
 import { Agent, AgentType, ResourceType, WorldState } from '../types';
-import { BASE_NEEDS } from '../constants';
+import { BASE_NEEDS, SURVIVAL_CONSTRAINTS } from '../constants';
 import { DeterministicRNG } from './randomService';
 
 /**
@@ -33,6 +33,8 @@ const calculateHouseholdUtility = (foodConsumed: number, isEmployed: boolean): n
 };
 
 export const householdDecision = (agent: Agent, state: WorldState, rng: DeterministicRNG) => {
+  if (!agent.active) return;
+
   // 1. Consumption Logic (Survival Constraint > Utility Maximization)
   const foodAvailable = agent.inventory[ResourceType.CONSUMER_GOODS] || 0;
   const needed = BASE_NEEDS.FOOD_CONSUMPTION;
@@ -44,6 +46,13 @@ export const householdDecision = (agent: Agent, state: WorldState, rng: Determin
   // Update Inventory (State Mutation - strictly local to agent)
   agent.inventory[ResourceType.CONSUMER_GOODS] -= actualConsumption;
   
+  // v0.1.1: STARVATION LOGIC
+  if (actualConsumption < needed) {
+    agent.starvationStreak = (agent.starvationStreak || 0) + 1;
+  } else {
+    agent.starvationStreak = 0;
+  }
+
   // Update Utility Metric
   agent.currentUtility = calculateHouseholdUtility(actualConsumption, !!agent.employedAt);
 
@@ -56,8 +65,15 @@ export const householdDecision = (agent: Agent, state: WorldState, rng: Determin
   if (!agent.employedAt) {
     // If unemployed, the marginal utility of high wage is 0 (since probability of hire drops).
     // Decay wage expectation to increase probability of employment.
-    // Randomness factor represents heterogeneous information/desperation.
-    const decayFactor = 0.90 + (rng.next() * 0.10); // 0.90 - 1.00
+    
+    // v0.1.1: PANIC MODE
+    // If starving, the agent becomes desperate and slashes reservation wage drastically.
+    let decayFactor = 0.90 + (rng.next() * 0.10); // Normal decay
+    
+    if ((agent.starvationStreak || 0) >= SURVIVAL_CONSTRAINTS.STARVATION_THRESHOLD) {
+      decayFactor = 0.5; // Desperation collapse
+    }
+
     agent.wageExpectation = Math.max(1, agent.wageExpectation * decayFactor);
   } else {
     // If employed, utility is high. Agent might test market power.
@@ -72,11 +88,20 @@ export const householdDecision = (agent: Agent, state: WorldState, rng: Determin
 // --- Firm Logic ---
 
 export const firmDecision = (agent: Agent, state: WorldState, rng: DeterministicRNG) => {
+  if (!agent.active) return;
+
   // Profit Maximization Goal
   // Profit = (P * Q) - (W * L)
   
   const inventory = agent.inventory[ResourceType.CONSUMER_GOODS] || 0;
   const lastProfit = agent.lastProfit || 0;
+
+  // v0.1.1: INSOLVENCY TRACKING
+  if (agent.cash < SURVIVAL_CONSTRAINTS.FIRM_MIN_CASH || lastProfit < 0) {
+    agent.insolvencyStreak = (agent.insolvencyStreak || 0) + 1;
+  } else {
+    agent.insolvencyStreak = Math.max(0, (agent.insolvencyStreak || 0) - 1);
+  }
 
   // 1. Pricing Strategy (Market Clearing)
   // Heuristic: If Inventory high, Price too high.
