@@ -1,257 +1,172 @@
+import React, { useReducer, useState, useEffect } from 'react';
+import { getInitialState, runTick } from './engine';
+import { Agent, CONSTANTS } from './types';
 
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { initializeSimulation, runTick } from './services/simulationEngine';
-import { WorldState } from './types';
-import { EXPERIMENTS } from './constants';
-import { MetricsDashboard } from './components/MetricsDashboard';
-import { Play, Pause, RefreshCw, Save, FlaskConical } from 'lucide-react';
-
-const translateType = (type: string) => {
-  const map: Record<string, string> = {
-    'HOUSEHOLD': '家庭',
-    'FIRM': '企业',
-    'BANK': '银行',
-    'GOVERNMENT': '政府',
-    'CENTRAL_BANK': '央行'
-  };
-  return map[type] || type;
-};
-
-const translateReason = (reason: string) => {
-  const map: Record<string, string> = {
-    'WAGE_PAYMENT': '支付工资',
-    'PURCHASE_GOODS': '购买商品',
-    'INCOME_TAX': '个人所得税',
-    'WEALTH_TAX': '财富税',
-    'SUBSIDY': '一般补贴',
-    'EMERGENCY_WELFARE': '生存低保',
-    'BANKRUPTCY_LIQUIDATION': '破产清算',
-    'BOND_INTEREST': '国债利息',
-    'BOND_PURCHASE': '购买国债',
-    'BOND_REDEMPTION': '赎回国债'
-  };
-  return map[reason] || reason;
-};
-
-const App: React.FC = () => {
-  const [selectedExperiment, setSelectedExperiment] = useState<string>('BASELINE');
-  const [worldState, setWorldState] = useState<WorldState | null>(null);
-  const [isRunning, setIsRunning] = useState(false);
-  const [tickSpeed, setTickSpeed] = useState(500); 
-  const timerRef = useRef<number | null>(null);
-
-  useEffect(() => {
-    setWorldState(initializeSimulation(selectedExperiment));
-  }, [selectedExperiment]);
-
-  const handleTick = useCallback(() => {
-    setWorldState(prev => {
-      if (!prev) return null;
-      return runTick(prev);
-    });
-  }, []);
-
-  useEffect(() => {
-    if (isRunning) {
-      timerRef.current = window.setInterval(handleTick, tickSpeed);
-    } else {
-      if (timerRef.current) clearInterval(timerRef.current);
+const AgentCard = ({ agent }: { agent: Agent }) => {
+  const getRoleColor = (role: string) => {
+    switch(role) {
+      case 'Worker': return 'border-blue-500 text-blue-100';
+      case 'Producer': return 'border-amber-500 text-amber-100';
+      case 'Employer': return 'border-green-500 text-green-100';
+      case 'Government': return 'border-purple-500 text-purple-100';
+      default: return 'border-gray-500';
     }
-    return () => {
-      if (timerRef.current) clearInterval(timerRef.current);
-    };
-  }, [isRunning, tickSpeed, handleTick]);
-
-  const handleReset = () => {
-    setIsRunning(false);
-    setWorldState(initializeSimulation(selectedExperiment));
   };
-
-  const handleExport = () => {
-    if (!worldState) return;
-    const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(worldState.metricsHistory, null, 2));
-    const downloadAnchorNode = document.createElement('a');
-    downloadAnchorNode.setAttribute("href", dataStr);
-    downloadAnchorNode.setAttribute("download", `econ_sim_${selectedExperiment}_tick_${worldState.tick}.json`);
-    document.body.appendChild(downloadAnchorNode);
-    downloadAnchorNode.click();
-    downloadAnchorNode.remove();
-  };
-
-  if (!worldState) return <div className="p-10 text-white">正在初始化实验环境...</div>;
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-200 font-sans">
-      <header className="border-b border-slate-800 bg-slate-900 p-4 flex flex-col md:flex-row items-center justify-between sticky top-0 z-10 gap-4">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 bg-emerald-600 rounded flex items-center justify-center font-bold text-slate-900 shadow-lg shadow-emerald-900/50">
-            <FlaskConical size={20} />
+    <div className={`p-3 border-2 rounded bg-gray-800 ${agent.isAlive ? getRoleColor(agent.role) : 'border-gray-700 opacity-50 grayscale'}`}>
+      <div className="flex justify-between items-center mb-2">
+        <span className="font-bold text-sm">{agent.name}</span>
+        <span className="text-xs uppercase tracking-wider opacity-75">{agent.role}</span>
+      </div>
+      
+      {!agent.isAlive ? (
+        <div className="text-red-500 font-bold text-center py-2">DECEASED</div>
+      ) : (
+        <div className="space-y-1 text-sm font-mono">
+          <div className="flex justify-between">
+            <span>Cash:</span>
+            <span className={agent.money < CONSTANTS.PRICE ? "text-red-400" : "text-green-400"}>
+              ${agent.money}
+            </span>
           </div>
-          <div>
-            <h1 className="text-lg font-bold text-white flex items-center gap-2">
-              EconSim Core <span className="text-xs bg-slate-800 px-2 py-0.5 rounded border border-slate-700 text-emerald-400">v0.3.0 Modular</span>
-            </h1>
-            <div className="text-xs text-slate-400 font-mono flex gap-2">
-               <span>时刻 (Tick): {worldState.tick.toString().padStart(6, '0')}</span>
-               <span className="text-slate-600">|</span>
-               <span>{worldState.config.name.split(' (')[0]}</span>
-            </div>
+          <div className="flex justify-between">
+            <span>Food:</span>
+            <span className={agent.inventory === 0 ? "text-red-400" : "text-blue-400"}>
+              {agent.inventory}
+            </span>
           </div>
-        </div>
-
-        <div className="flex items-center gap-4 flex-wrap justify-center">
-           {/* Experiment Selector */}
-           <div className="flex items-center gap-2">
-             <span className="text-xs text-slate-400 font-bold uppercase tracking-wider">实验配置:</span>
-             <select 
-               value={selectedExperiment}
-               onChange={(e) => {
-                 setIsRunning(false);
-                 setSelectedExperiment(e.target.value);
-               }}
-               className="bg-slate-950 border border-slate-700 text-xs rounded px-2 py-1.5 focus:border-emerald-500 outline-none w-48"
-             >
-               {Object.values(EXPERIMENTS).map(exp => (
-                 <option key={exp.id} value={Object.keys(EXPERIMENTS).find(key => EXPERIMENTS[key].id === exp.id)}>
-                   {exp.name}
-                 </option>
-               ))}
-             </select>
-           </div>
-
-           <div className="h-6 w-px bg-slate-800 hidden md:block"></div>
-
-           <div className="flex items-center gap-2 bg-slate-950 rounded px-2 py-1 border border-slate-700">
-             <span className="text-xs text-slate-400">FPS</span>
-             <input 
-               type="range" 
-               min="50" 
-               max="2000" 
-               step="50"
-               value={tickSpeed}
-               onChange={(e) => setTickSpeed(Number(e.target.value))}
-               className="w-16 accent-emerald-500 h-1"
-             />
-           </div>
-
-           <div className="flex gap-2">
-            <button
-              onClick={() => setIsRunning(!isRunning)}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded font-medium transition-colors border text-sm ${
-                isRunning 
-                  ? 'bg-amber-500/10 text-amber-500 hover:bg-amber-500/20 border-amber-500/50' 
-                  : 'bg-emerald-500/10 text-emerald-500 hover:bg-emerald-500/20 border-emerald-500/50'
-              }`}
-            >
-              {isRunning ? <Pause size={14} /> : <Play size={14} />}
-              {isRunning ? '暂停' : '运行'}
-            </button>
-            
-            <button onClick={handleTick} disabled={isRunning} className="px-3 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 disabled:opacity-50 text-sm">
-              单步
-            </button>
-
-            <button onClick={handleReset} className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-400 hover:text-white" title="重置环境">
-              <RefreshCw size={14} />
-            </button>
-            
-            <button onClick={handleExport} className="px-2 py-1.5 rounded bg-slate-800 hover:bg-slate-700 border border-slate-600 text-slate-400 hover:text-white" title="导出 JSON 数据">
-              <Save size={14} />
-            </button>
+          <div className="mt-2 text-xs text-gray-400 h-4 overflow-hidden text-right italic">
+             {agent.lastAction}
           </div>
         </div>
-      </header>
-
-      <main className="container mx-auto py-6 px-4">
-        {/* Experiment Info Banner */}
-        <div className="mb-6 p-4 bg-slate-900/50 border border-slate-800 rounded-lg flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
-            <div>
-               <h2 className="text-emerald-400 font-bold text-sm mb-1">活跃机制堆栈 (Mechanism Stack)</h2>
-               <div className="flex flex-wrap gap-2">
-                  {worldState.config.activeMarkets.map(m => (
-                    <span key={m} className="text-[10px] bg-blue-900/30 text-blue-300 border border-blue-800 px-2 py-0.5 rounded">{m}</span>
-                  ))}
-                  {worldState.config.activeInstitutions.map(i => (
-                    <span key={i} className="text-[10px] bg-purple-900/30 text-purple-300 border border-purple-800 px-2 py-0.5 rounded">{i}</span>
-                  ))}
-               </div>
-            </div>
-            <div className="text-xs text-slate-400 max-w-md text-right italic">
-              "{worldState.config.description}"
-            </div>
-        </div>
-
-        <MetricsDashboard state={worldState} />
-
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
-          <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
-            <h3 className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider flex justify-between">
-              <span>代理人状态监控 (Agents)</span>
-              <span className="text-emerald-500">共 {worldState.agents.size} 个体</span>
-            </h3>
-            <div className="space-y-2 max-h-96 overflow-y-auto font-mono text-xs pr-2">
-              <div className="grid grid-cols-12 gap-2 px-2 py-1 text-slate-500 border-b border-slate-800 mb-2 font-bold bg-slate-950">
-                 <div className="col-span-2">ID</div>
-                 <div className="col-span-2">类型</div>
-                 <div className="col-span-2 text-right">现金余额</div>
-                 <div className="col-span-3 text-right">核心指标</div>
-                 <div className="col-span-3 text-right">策略输出</div>
-              </div>
-              {Array.from(worldState.agents.values()).slice(0, 8).map(agent => (
-                <div key={agent.id} className={`grid grid-cols-12 gap-2 p-2 rounded border items-center transition-colors ${
-                    !agent.active ? 'bg-red-950/20 border-red-900/30 text-slate-600' : 'bg-slate-950/30 border-slate-800/50 hover:bg-slate-800'
-                  }`}>
-                  <div className={`col-span-2 font-bold truncate ${!agent.active ? 'text-red-500' : 'text-emerald-400'}`} title={agent.id}>
-                    {agent.id}
-                  </div>
-                  <div className="col-span-2 text-slate-500 truncate">
-                    {translateType(agent.type)} 
-                  </div>
-                  <div className={`col-span-2 text-right ${agent.cash < 0 ? 'text-red-400' : 'text-slate-200'}`}>${agent.cash.toFixed(0)}</div>
-                  <div className="col-span-3 text-right text-amber-400">
-                    {agent.type === 'FIRM' 
-                      ? (agent.active ? `存:${agent.inventory.CONSUMER_GOODS} E:${agent.memory.avgProfit.toFixed(0)}` : '已破产')
-                      : `技:${agent.skillLevel?.toFixed(2)}`}
-                  </div>
-                  <div className="col-span-3 text-right text-blue-400">
-                    {agent.employedAt 
-                      ? '在职' 
-                      : (agent.type === 'FIRM' 
-                          ? (agent.active ? `$${agent.salesPrice?.toFixed(1)}` : '-')
-                          : `期望:$${agent.wageExpectation.toFixed(0)}`)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          <div className="bg-slate-900 rounded-lg border border-slate-800 p-4">
-            <h3 className="text-xs font-bold text-slate-400 mb-3 uppercase tracking-wider">实时交易账本 (Transaction Ledger)</h3>
-            <div className="space-y-1 max-h-96 overflow-y-auto font-mono text-xs pr-2">
-               <div className="flex justify-between px-2 py-1 text-slate-500 border-b border-slate-800 mb-2 font-bold bg-slate-950">
-                  <span className="w-12">Tick</span>
-                  <span className="w-20">转出方</span>
-                  <span className="w-4"></span>
-                  <span className="w-20 text-right">转入方</span>
-                  <span className="w-16 text-right">金额</span>
-                  <span className="flex-1 text-right">交易类型</span>
-               </div>
-              {[...worldState.ledger].reverse().slice(0, 20).map((entry, idx) => (
-                <div key={idx} className="flex justify-between p-2 bg-slate-950/30 rounded border-b border-slate-800/30 hover:bg-slate-900">
-                  <span className="text-slate-600 w-12">{entry.tick}</span>
-                  <span className="text-blue-300 w-20 truncate" title={entry.fromId}>{entry.fromId}</span>
-                  <span className="text-slate-700">→</span>
-                  <span className="text-emerald-300 w-20 text-right truncate" title={entry.toId}>{entry.toId}</span>
-                  <span className="text-white font-bold w-16 text-right">${entry.amount.toFixed(0)}</span>
-                  <span className="text-slate-400 text-right flex-1 truncate">{translateReason(entry.reason)}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </main>
+      )}
     </div>
   );
 };
 
-export default App;
+export default function App() {
+  const [state, dispatch] = useReducer((state: any, action: any) => {
+    switch (action.type) {
+      case 'RESET': return getInitialState();
+      case 'TICK': return runTick(state);
+      default: return state;
+    }
+  }, null, getInitialState);
+
+  const [autoPlay, setAutoPlay] = useState(false);
+
+  useEffect(() => {
+    let interval: any;
+    if (autoPlay && state.aliveCount > 0) {
+      interval = setInterval(() => {
+        dispatch({ type: 'TICK' });
+      }, 800);
+    }
+    return () => clearInterval(interval);
+  }, [autoPlay, state.aliveCount]);
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-gray-200 p-6 font-sans">
+      <header className="mb-6 flex justify-between items-end border-b border-gray-800 pb-4">
+        <div>
+          <h1 className="text-2xl font-bold text-white mb-1">EconSim <span className="text-blue-500">MRE v0.1</span></h1>
+          <p className="text-xs text-gray-400">Minimal Reproducible Economy (10 Agents)</p>
+        </div>
+        
+        <div className="flex gap-4 text-sm font-mono">
+           <div className="bg-gray-900 px-3 py-1 rounded border border-gray-700">
+             Tick: <span className="text-white font-bold">{state.tick}</span>
+           </div>
+           <div className="bg-gray-900 px-3 py-1 rounded border border-gray-700">
+             Alive: <span className={state.aliveCount < 10 ? "text-red-400" : "text-green-400"}>{state.aliveCount}/10</span>
+           </div>
+           <div className="bg-gray-900 px-3 py-1 rounded border border-gray-700">
+             Money Supply: <span className="text-yellow-400">${state.totalMoney}</span>
+           </div>
+        </div>
+      </header>
+
+      <main className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        
+        {/* Left Col: Controls & Rules */}
+        <div className="lg:col-span-1 space-y-6">
+          <div className="bg-gray-900 p-4 rounded border border-gray-800">
+            <h2 className="text-sm font-bold text-gray-400 uppercase mb-3">Controls</h2>
+            <div className="flex gap-2">
+              <button 
+                onClick={() => dispatch({ type: 'TICK' })}
+                disabled={autoPlay || state.aliveCount === 0}
+                className="flex-1 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white py-2 rounded font-bold transition-colors"
+              >
+                Step Tick
+              </button>
+              <button 
+                onClick={() => setAutoPlay(!autoPlay)}
+                disabled={state.aliveCount === 0}
+                className={`flex-1 py-2 rounded font-bold transition-colors border ${autoPlay ? 'bg-red-900 border-red-700 text-red-100' : 'bg-gray-800 border-gray-700 hover:bg-gray-700'}`}
+              >
+                {autoPlay ? 'Pause' : 'Auto'}
+              </button>
+              <button 
+                onClick={() => { setAutoPlay(false); dispatch({ type: 'RESET' }); }}
+                className="px-4 bg-gray-800 border border-gray-700 hover:bg-gray-700 text-white rounded"
+              >
+                Reset
+              </button>
+            </div>
+          </div>
+
+          <div className="bg-gray-900 p-4 rounded border border-gray-800 text-sm">
+             <h2 className="text-sm font-bold text-gray-400 uppercase mb-3">Model Parameters</h2>
+             <ul className="space-y-2 font-mono text-gray-300">
+                <li className="flex justify-between"><span>Wage</span> <span>${CONSTANTS.WAGE}</span></li>
+                <li className="flex justify-between"><span>Food Price</span> <span>${CONSTANTS.PRICE}</span></li>
+                <li className="flex justify-between"><span>Tax Rate</span> <span>{CONSTANTS.TAX_RATE * 100}%</span></li>
+                <li className="flex justify-between"><span>Survival Need</span> <span>{CONSTANTS.FOOD_NEED} Unit</span></li>
+             </ul>
+             <div className="mt-4 text-xs text-gray-500 border-t border-gray-800 pt-2">
+               Logic: Employer (I) hires Workers (A-F) to help Producers (G-H). 
+               1 Worker + 1 Producer = 1 Food.
+               Employer owns Food and sells at Market Price.
+             </div>
+          </div>
+
+          <div className="bg-gray-900 p-4 rounded border border-gray-800 h-64 overflow-hidden flex flex-col">
+             <h2 className="text-sm font-bold text-gray-400 uppercase mb-2">Event Log</h2>
+             <div className="flex-1 overflow-y-auto font-mono text-xs space-y-1 pr-2">
+                {state.logs.map((log: string, i: number) => (
+                  <div key={i} className={`pb-1 border-b border-gray-800 ${log.includes('Tick') ? 'text-blue-400 mt-2 font-bold' : log.includes('DEATH') || log.includes('CRITICAL') ? 'text-red-400' : 'text-gray-400'}`}>
+                    {log}
+                  </div>
+                ))}
+             </div>
+          </div>
+        </div>
+
+        {/* Right Col: The 10 Agents Grid */}
+        <div className="lg:col-span-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-4 gap-3">
+            {state.agents.map((agent: Agent) => (
+              <AgentCard key={agent.id} agent={agent} />
+            ))}
+          </div>
+          
+          <div className="mt-6 bg-gray-900 p-4 rounded border border-gray-800">
+             <h3 className="text-sm font-bold text-gray-400 uppercase mb-2">Macro Analysis</h3>
+             <div className="text-sm text-gray-400">
+                {state.tick === 0 && "Simulation pending start."}
+                {state.tick > 0 && state.aliveCount < 10 && (
+                   <span className="text-red-400">Warning: Population collapse initiated. Check affordability.</span>
+                )}
+                {state.tick > 0 && state.aliveCount === 10 && (
+                   <span className="text-green-400">Economy Stable. Circulation active.</span>
+                )}
+             </div>
+          </div>
+        </div>
+
+      </main>
+    </div>
+  );
+}
